@@ -6,6 +6,7 @@ library(mboost)
 library(tidyverse)
 library(pracma)
 library(gglasso)
+library(mvtnorm)
 
 set.seed(1)
 dat <- pracma::randortho(100, type = 'orthonormal')[,1:4,drop=F] %>%
@@ -17,9 +18,24 @@ dat <- dat %>%
 mb_model <- mboost(y ~bols(V1, V2,intercept = T, df =1)+bols(V3, V4,intercept = T, df =1),
                    data = dat, control = boost_control(mstop = 1, nu = 1))
 
-run_experiment <- function(iteration, intercept = TRUE, scaled = TRUE){
+run_experiment <- function(iteration, intercept = TRUE, scaled = TRUE, type = 'ortho'){
+  if(type == 'ortho'){
   dat<- pracma::randortho(100, type = 'orthonormal')[,1:5,drop=F] %>%
     as.data.frame() 
+  } else if(type == 'independent'){
+    dat <- matrix( rnorm(100*5,mean=0,sd=1), 100, 5) %>% as.data.frame() 
+  } else if(type == 'singular'){
+    dat <- pracma::randortho(100, type = 'orthonormal')[,1:5,drop=F]%*%diag(c(1,2,1,5,1))%*%
+      t(pracma::randortho(5, type = 'orthonormal')[,1:5,drop=F]) %>% as.data.frame()
+  } else if(type == 'cor'){
+    dat <- mvtnorm::rmvnorm(n=100, mean = rep(0,5), sigma = matrix(c(1,  0.9,0,0,0.5, 
+                                                              0.9,1,  0,0,0.5,
+                                                              0,  0,  1,0,0,
+                                                              0,  0,  0,1,0,
+                                                              0.5,0.5,0,0,1
+                                                              ),nrow = 5)) %>%
+      as.data.frame()
+  }
   dat <- dat %>%
     mutate(V2 = V2*2, V4 = V4*5) %>%
     mutate(y = rnorm(n=100))
@@ -52,9 +68,10 @@ run_experiment <- function(iteration, intercept = TRUE, scaled = TRUE){
     rownames_to_column() %>%
     gather(key = 'lambda', value = 'coef', -rowname) %>%
     filter(coef != 0) %>%
-    slice(1:5) %>%
+    slice(1:5) 
+  gr_lasso_coef <- gr_lasso_coef %>%
    filter(lambda == gr_lasso_coef$lambda[1])
-  if(dim(gr_lasso_coef)[2] > 2){gr_sel <- NA} else{
+  if(dim(gr_lasso_coef)[1] > 2){gr_sel <- NA} else{
     gr_sel <- case_when(gr_lasso_coef$rowname %in% c('V1','V2')~ 1, 
                         gr_lasso_coef$rowname %in% c('V3')~3, T ~ 2, T ~ NA)
   }
@@ -78,10 +95,10 @@ run_experiment <- function(iteration, intercept = TRUE, scaled = TRUE){
 
 library(furrr)
 plan(multisession)
-iterations <- 100
+iterations <- 100000
 # Define the 12 data scenarios
-params <- tidyr::expand_grid(iteration = 1:iterations, scaled = c(TRUE,FALSE) )
-
+params <- tidyr::expand_grid(iteration = 1:iterations, scaled = c(TRUE,FALSE),
+                             type = c('ortho', 'independent', 'singular', 'cor'))
 # run simulation in parallel
 set.seed(5)
 tictoc::tic()
@@ -95,7 +112,9 @@ saveRDS(file = 'results/orthogonal_1_raw.RDS', results_df)
 results_df %>%
   group_by(scaled, model, sel) %>%
   tally() %>%
-  mutate(prop = round(n/sum(n), 3)) %>%
+  mutate(prop = round(n/sum(n,na.rm = T), 3)) %>%
 saveRDS(file = 'results/orthogonal_1_raw.RDS')
 plan(sequential)
 
+# Categorical data 
+x <- sample( LETTERS[1:4], 10000, replace=TRUE, prob=c(0.1, 0.2, 0.65, 0.05) )
