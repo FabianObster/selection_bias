@@ -173,6 +173,68 @@ results_df %>%
   saveRDS(file = 'results/big_group_1.RDS')
 plan(sequential)
 
-
+################################################################################
+################################################################################
 # Categorical data 
-x <- sample( LETTERS[1:4], 10000, replace=TRUE, prob=c(0.1, 0.2, 0.65, 0.05) )
+run_experiment <- function(iteration, intercept = TRUE,  type = 'ortho'){
+  dat <- data.frame(V1 = factor(sample(LETTERS[1:3], 120, replace=TRUE, prob=c(0.8, 0.1,0.1))), 
+                    V2 = factor(sample(LETTERS[1:3], 120, replace=TRUE, prob=c(1/3, 1/3,1/3))),
+                    V3 = factor(sample(LETTERS[1:2], 120, replace= TRUE, prob=c(0.5,0.5))),
+                    V4 = rnorm(120))
+  dat <- dat %>% mutate(y = rnorm(120))
+  dat_model <- model.matrix(~., select(dat,-y))[,-1]
+  mb_model_unreg <- mboost(y ~bols(V1B,V1C)+bols(V2C,V2B)+bols(V3B)+bols(V4),
+                           data = dat_model %>% as.data.frame() %>% mutate(y = dat$y), control = boost_control(mstop = 1, nu = 1))
+  mb_model_0.5 <- mboost(y ~bols(V1B,V1C,df=0.5)+bols(V2C,V2B,df=0.5)+bols(V3B,df=0.5)+bols(V4,df=0.5),
+                         data = dat_model %>% as.data.frame() %>% mutate(y = dat$y), control = boost_control(mstop = 1, nu = 1))
+  mb_model_0.1 <- mboost(y ~bols(V1B,V1C,df=0.1)+bols(V2C,V2B,df=0.1)+bols(V3B,df=0.1)+bols(V4,df=0.1),
+                         data = dat_model %>% as.data.frame()  %>% mutate(y = dat$y), control = boost_control(mstop = 1, nu = 1))
+  mb_model_1 <- mboost(y ~bols(V1B,V1C,df=1)+bols(V2C,V2B,df=1)+bols(V3B,df=1)+bols(V4,df=1),
+                       data = dat_model %>% as.data.frame()  %>% mutate(y = dat$y), control = boost_control(mstop = 1, nu = 1))
+  mb_model_lam <- mboost(y ~bols(V1B,V1C,lambda=10)+bols(V2C,V2B,lambda=10)+bols(V3B,lambda=10)+bols(V4,lambda=10),
+                         data = dat_model %>% as.data.frame()  %>% mutate(y = dat$y), control = boost_control(mstop = 1, nu = 1))
+  gr_lasso <- gglasso(x = dat_model, y = dat$y,
+                      group = c(1,1,2,2,3,4))
+  gr_lasso_coef <- gr_lasso$beta %>% 
+    as.data.frame() %>% 
+    rownames_to_column() %>%
+    gather(key = 'lambda', value = 'coef', -rowname) %>%
+    filter(coef != 0) %>%
+    slice(1:6) 
+  gr_lasso_coef <- gr_lasso_coef %>%
+    filter(lambda == gr_lasso_coef$lambda[1])
+  if(dim(gr_lasso_coef)[1] > 2){gr_sel <- NA} else{
+    gr_sel <- case_when(any(gr_lasso_coef$rowname %in% c('V1B','V1C'))~ 1, 
+                        any(gr_lasso_coef$rowname %in% c('V2B','V2C'))~ 2,
+                        any(gr_lasso_coef$rowname %in% c('V3B'))~ 3, T ~ 4)
+  }
+  ret <- data.frame(model = c('mb', 'mb_0.5', 'mb_1', 'mb_0.1', 'mb_lambda', 'grla'), 
+                    sel = c(mb_model_unreg$xselect(), mb_model_0.5$xselect(),
+                            mb_model_1$xselect(), mb_model_0.1$xselect(),
+                            mb_model_lam$xselect(), gr_sel))
+  return(ret)
+}
+# group size 1 vs 15
+library(furrr)
+plan(multisession)
+iterations <- 100000
+# Define the 12 data scenarios
+params <- tidyr::expand_grid(iteration = 1:iterations,
+                             type = c('ortho', 'independent', 'singular', 'cor'))
+# run simulation in parallel
+set.seed(5)
+tictoc::tic()
+results_df <- params %>%
+  mutate( 
+    res = future_pmap(., .f = run_experiment, .progress = T, .options=furrr_options(seed = TRUE))
+  ) %>%
+  unnest(cols = res)
+tictoc::toc()
+saveRDS(file = 'results/small_cat_1_raw.RDS', results_df)
+results_df %>%
+  group_by(scaled, model, type, sel) %>%
+  tally() %>%
+  filter(!is.na(sel)) %>%
+  mutate(prop = round(n/sum(n,na.rm = T), 3)) %>%
+  saveRDS(file = 'results/small_catp_1.RDS')
+plan(sequential)
