@@ -148,7 +148,6 @@ run_experiment <- function(iteration, intercept = TRUE, scaled = TRUE, type = 'o
                             mb_model_lam$xselect(), gr_sel))
   return(ret)
 }
-# group size 1 vs 15
 library(furrr)
 plan(multisession)
 iterations <- 100000
@@ -177,7 +176,7 @@ plan(sequential)
 ################################################################################
 # Categorical data 
 run_experiment <- function(iteration, intercept = TRUE,  type = 'ortho'){
-  dat <- data.frame(V1 = factor(sample(LETTERS[1:3], 120, replace=TRUE, prob=c(0.8, 0.1,0.1))), 
+  dat <- data.frame(V1 = factor(sample(LETTERS[1:3], 120, replace=TRUE, prob=c(0.7, 0.15,0.15))), 
                     V2 = factor(sample(LETTERS[1:3], 120, replace=TRUE, prob=c(1/3, 1/3,1/3))),
                     V3 = factor(sample(LETTERS[1:2], 120, replace= TRUE, prob=c(0.5,0.5))),
                     V4 = rnorm(120))
@@ -214,7 +213,6 @@ run_experiment <- function(iteration, intercept = TRUE,  type = 'ortho'){
                             mb_model_lam$xselect(), gr_sel))
   return(ret)
 }
-# group size 1 vs 15
 library(furrr)
 plan(multisession)
 iterations <- 100000
@@ -232,9 +230,9 @@ results_df <- params %>%
 tictoc::toc()
 saveRDS(file = 'results/small_cat_1_raw.RDS', results_df)
 results_df %>%
-  group_by(scaled, model, type, sel) %>%
+  group_by(model, type, sel) %>%
   tally() %>%
   filter(!is.na(sel)) %>%
   mutate(prop = round(n/sum(n,na.rm = T), 3)) %>%
-  saveRDS(file = 'results/small_catp_1.RDS')
+  saveRDS(file = 'results/small_cat_1.RDS')
 plan(sequential)
