@@ -4,7 +4,7 @@ library(pracma)
 library(gglasso)
 library(mvtnorm)
 library(furrr)
-
+library(sparsegl)
 get_parameters <- function(df, group_df, block_fit, block_size = 1000, max_steps = 50, tol = 0.001, rate = 0.1, initialization = F){
   # Initialization
   scaling <- as.data.frame(t(rep(1,length(unique(group_df$var_name)))))
@@ -175,7 +175,7 @@ params_list_1 <- readRDS('results_fixed/params_list_1.RDS')
 
 run_experiment <- function(iteration){
   ret <- data.frame()
-  for(beta_type in c('zero', 'high', 'low', 'equal')){
+  for(beta_type in c('zero', 'high', 'low', 'one')){
   for(type in c('ortho', 'ind', 'singular', 'col')){
   if(type == 'ortho'){
     dat <- dat_ortho
@@ -204,7 +204,7 @@ run_experiment <- function(iteration){
       beta <- c(0.1,0,0.1,0,0.1)
     }
     dat <- dat %>%
-     dplyr::mutate(y = V1*beta[1]+ V2*beta[2]+ V3*beta[3]+ V4*beta[4]+ V5*beta[5]+ rnorm(n=1))
+     dplyr::mutate(y = V1*beta[1]+ V2*beta[2]+ V3*beta[3]+ V4*beta[4]+ V5*beta[5]+ rnorm(n=100))
   mb_model_unreg <- mboost::mboost(y ~bols(V1, V2)+bols(V3, V4) + bols(V5),
                      data = dat, control = boost_control(mstop = 1, nu = 1))
   mb_model_0.5 <- mboost::mboost(y ~bols(V1, V2, df = 0.5) +
@@ -281,6 +281,21 @@ run_experiment <- function(iteration){
                            rowname %in% c('V5')~ 3))
   if(length(gr_lasso_005_coef$sel) == 0){gr_lasso_005_coef_sel <- NA} else{gr_lasso_005_coef_sel <- gr_lasso_005_coef$sel}
   gr_lasso_005_sel <- data.frame(model = 'grla005', sel = unique(gr_lasso_005_coef_sel), type = type, beta_type = beta_type)
+  sgr_lasso <- sparsegl(x = as.matrix(dat %>% select(-y)),
+                        y = dat$y, group = c(1,1,2,2,3), lambda = 0.005, asparse = 0.5)
+  sgr_lasso_coef <- sgr_lasso$beta %>%
+    as.matrix() %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column() %>%
+    tidyr::gather(key = 'lambda', value = 'coef', -rowname) %>%
+    dplyr::filter(coef != 0) %>%
+    dplyr::slice(1:5)
+  sgr_lasso_coef <-  sgr_lasso_coef %>%
+    dplyr::mutate(sel = case_when(rowname %in% c('V1','V2')~ 1,
+                                  rowname %in% c('V3','V4')~2,
+                                  rowname %in% c('V5')~ 3))
+  if(length( sgr_lasso_coef$sel) == 0){ sgr_lasso_coef_sel <- NA} else{ sgr_lasso_coef_sel <-  sgr_lasso_coef$sel}
+  sgr_lasso_sel <- data.frame(model = 'sgr_lasso', sel = unique( sgr_lasso_coef_sel), type = type, beta_type = beta_type)
   ret <- ret %>% 
     bind_rows(data.frame(model = c('mb', 'mb_0.5', 'mb_0.5_sc','mb_lam', 'mb_lam_sc'),
               sel = c(mb_model_unreg$xselect(), mb_model_0.5$xselect(),
@@ -290,6 +305,7 @@ run_experiment <- function(iteration){
     rbind(gr_lasso_005_sel) %>%
     rbind(gr_lasso_01_sc_sel) %>%
     rbind(gr_lasso_01_sel) %>%
+    rbind(sgr_lasso_sel) %>%
     filter(!is.na(sel)))
   }
   }
@@ -308,7 +324,7 @@ results_df <- params %>%
   dplyr::mutate( 
     res = future_pmap(., .f = ~run_experiment(.iteration), .progress = T,
                       .options=furrr_options(seed = TRUE, globals = c('params_list_1', 'run_experiment', 'dat_ortho', 'dat_independent', 'dat_singular', 'dat_cor'),
-                                             packages = c('mboost', 'tidyverse', 'gglasso')))
+                                             packages = c('mboost', 'tidyverse', 'gglasso', 'sparsegl')))
   ) %>%
   unnest(cols = res)
 tictoc::toc()
@@ -422,7 +438,7 @@ params_list_2 <- readRDS('results_fixed/params_list_2.RDS')
 
 run_experiment <- function(iteration){
   ret <- data.frame()
-  for(beta_type in c('zero', 'high', 'low', 'equal')){
+  for(beta_type in c('zero', 'high', 'low', 'one')){
     for(type in c('ortho', 'ind', 'singular', 'col')){
       if(type == 'ortho'){
         dat <- dat_ortho
@@ -453,7 +469,7 @@ run_experiment <- function(iteration){
       dat <- dat %>%
         dplyr::mutate(y = V1*beta[1]+V2*beta[2]+V3*beta[3]+V4*beta[4]+V5*beta[5]+
                           V6*beta[6]+V7*beta[7]+V8*beta[8]+V9*beta[9]+V10*beta[10]+
-                          V11*beta[11]+V12*beta[12]+V13*beta[13]+V14*beta[14]+V15*beta[15]+rnorm(n=1))
+                          V11*beta[11]+V12*beta[12]+V13*beta[13]+V14*beta[14]+V15*beta[15]+rnorm(n=100))
       mb_model_unreg <- mboost::mboost(y ~bols(V1,df=0.5)+bols(V2, V3, V4,V5, V6, V7,V8, V9, V10,V11, V12, V13,V14,V15,V16, df=0.5),
                                        data = dat, control = boost_control(mstop = 1, nu = 1))
       mb_model_0.5 <- mboost::mboost(y ~bols(V1,df=0.5)+bols(V2, V3, V4,V5, V6, V7,V8, V9, V10,V11, V12, V13,V14,V15,V16, df=0.5),
@@ -522,6 +538,21 @@ run_experiment <- function(iteration){
                                                       'V11','V12','V13','V14','V15','V16')~2))
       if(length(gr_lasso_005_coef$sel) == 0){gr_lasso_005_coef_sel <- NA} else{gr_lasso_005_coef_sel <- gr_lasso_005_coef$sel}
       gr_lasso_005_sel <- data.frame(model = 'grla005', sel = unique(gr_lasso_005_coef_sel), type = type, beta_type = beta_type)
+      sgr_lasso <- sparsegl(x = as.matrix(dat %>% select(-y)),
+                            y = dat$y, group = c(1, rep(2,15)), lambda = 0.005, asparse = 0.5)
+      sgr_lasso_coef <- sgr_lasso$beta %>%
+        as.matrix() %>%
+        as.data.frame() %>%
+        tibble::rownames_to_column() %>%
+        tidyr::gather(key = 'lambda', value = 'coef', -rowname) %>%
+        dplyr::filter(coef != 0) %>%
+        dplyr::slice(1:5)
+      sgr_lasso_coef <-  sgr_lasso_coef %>%
+        dplyr::mutate(sel = case_when(rowname %in% c('V1','V2')~ 1,
+                                      rowname %in% c('V3','V4')~2,
+                                      rowname %in% c('V5')~ 3))
+      if(length( sgr_lasso_coef$sel) == 0){ sgr_lasso_coef_sel <- NA} else{ sgr_lasso_coef_sel <-  sgr_lasso_coef$sel}
+      sgr_lasso_sel <- data.frame(model = 'sgr_lasso', sel = unique( sgr_lasso_coef_sel), type = type, beta_type = beta_type)
       ret <- ret %>% 
         bind_rows(data.frame(model = c('mb', 'mb_0.5', 'mb_0.5_sc','mb_lam', 'mb_lam_sc'),
                              sel = c(mb_model_unreg$xselect(), mb_model_0.5$xselect(),
@@ -531,6 +562,7 @@ run_experiment <- function(iteration){
                     rbind(gr_lasso_005_sel) %>%
                     rbind(gr_lasso_01_sc_sel) %>%
                     rbind(gr_lasso_01_sel) %>%
+                    rbind(sgr_lasso_sel) %>%
                     filter(!is.na(sel)))
     }
   }
@@ -549,7 +581,7 @@ results_df <- params %>%
   dplyr::mutate( 
     res = future_pmap(., .f = ~run_experiment(.iteration), .progress = T,
                       .options=furrr_options(seed = TRUE, globals = c('params_list_2', 'run_experiment', 'dat_ortho', 'dat_independent', 'dat_singular', 'dat_cor'),
-                                             packages = c('mboost', 'tidyverse', 'gglasso')))
+                                             packages = c('mboost', 'tidyverse', 'gglasso', 'sparsegl')))
   ) %>%
   unnest(cols = res)
 tictoc::toc()
@@ -658,7 +690,7 @@ dat_model <- as.data.frame(model.matrix(~., dat)[,-1])
 
 run_experiment <- function(iteration){
   ret <- data.frame()
-  for(beta_type in c('zero', 'high', 'low', 'equal')){
+  for(beta_type in c('zero', 'high', 'low', 'one')){
       dat_model <- dat_model %>%
         dplyr::mutate_all(function(x){as.numeric(scale(x))})
       if(beta_type == 'zero'){
@@ -677,7 +709,7 @@ run_experiment <- function(iteration){
         beta <- c(0.1,0,0.1,0,0.1,0.1)
       }
       dat_model <- dat_model %>%
-        dplyr::mutate(y = V1B*beta[1]+ V1C*beta[2]+ V2C*beta[3]+ V2B*beta[4]+ V3B*beta[5]+ V4*beta[6]+rnorm(1))
+        dplyr::mutate(y = V1B*beta[1]+ V1C*beta[2]+ V2C*beta[3]+ V2B*beta[4]+ V3B*beta[5]+ V4*beta[6]+rnorm(120))
       #dat$y <- dat_model$y
       mb_model_unreg <- mboost::mboost(y ~bols(V1B,V1C)+bols(V2C,V2B)+bols(V3B)+bols(V4),
                                        data = dat_model, control = boost_control(mstop = 1, nu = 1))
@@ -751,6 +783,21 @@ run_experiment <- function(iteration){
                                       rowname %in% c('V3B')~ 3, rowname %in% c('V4')~ 4))
       if(length(gr_lasso_005_coef$sel) == 0){gr_lasso_005_coef_sel <- NA} else{gr_lasso_005_coef_sel <- gr_lasso_005_coef$sel}
       gr_lasso_005_sel <- data.frame(model = 'grla005', sel = unique(gr_lasso_005_coef_sel),  beta_type = beta_type)
+      sgr_lasso <- sparsegl(x = as.matrix(dat_model %>% select(-y)),
+                            y = dat_model$y, group = c(1,1,2,2,3,4), lambda = 0.005, asparse = 0.5)
+      sgr_lasso_coef <- sgr_lasso$beta %>%
+        as.matrix() %>%
+        as.data.frame() %>%
+        tibble::rownames_to_column() %>%
+        tidyr::gather(key = 'lambda', value = 'coef', -rowname) %>%
+        dplyr::filter(coef != 0) %>%
+        dplyr::slice(1:5)
+      sgr_lasso_coef <-  sgr_lasso_coef %>%
+        dplyr::mutate(sel = case_when(rowname %in% c('V1B','V1C')~ 1, 
+                                      rowname %in% c('V2B','V2C')~2, 
+                                      rowname %in% c('V3B')~ 3, rowname %in% c('V4')~ 4))
+      if(length( sgr_lasso_coef$sel) == 0){ sgr_lasso_coef_sel <- NA} else{ sgr_lasso_coef_sel <-  sgr_lasso_coef$sel}
+      sgr_lasso_sel <- data.frame(model = 'sgr_lasso', sel = unique( sgr_lasso_coef_sel), beta_type = beta_type)
       ret <- ret %>% 
         bind_rows(data.frame(model = c('mb', 'mb_0.5', 'mb_0.5_sc','mb_lam', 'mb_lam_sc'),
                              sel = c(mb_model_unreg$xselect(), mb_model_0.5$xselect(),
@@ -760,6 +807,7 @@ run_experiment <- function(iteration){
                     rbind(gr_lasso_005_sel) %>%
                     rbind(gr_lasso_01_sc_sel) %>%
                     rbind(gr_lasso_01_sel) %>%
+                    rbind(sgr_lasso_sel) %>%
                     filter(!is.na(sel)))
   }
   return(ret)
@@ -778,7 +826,7 @@ results_df <- params %>%
     res = future_pmap(., .f = ~run_experiment(.iteration), .progress = T,
                       .options=furrr_options(seed = TRUE, globals = c('params_list_1', 'run_experiment', 
                                                                       'mb_params_df','mb_params_lam_10', 'lasso_params_005', 'lasso_params_01', 'dat_model'),
-                                             packages = c('mboost', 'tidyverse', 'gglasso')))
+                                             packages = c('mboost', 'tidyverse', 'gglasso', 'sparsegl')))
   ) %>%
   unnest(cols = res)
 tictoc::toc()
@@ -792,4 +840,11 @@ results_df %>%
   dplyr::mutate(prop = round(n/sum(n,na.rm = T), 3)) %>%
   saveRDS(file = 'results_fixed/cat_1.RDS')
 plan(sequential)
+
+
+
+
+####################
+####################
+# Analysis
 
